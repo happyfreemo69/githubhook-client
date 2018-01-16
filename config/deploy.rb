@@ -59,23 +59,5 @@ namespace :deploy do
   end
 
   after :publishing, :restart
-
   before :restart, 'deploy:npm_install'
-
-  desc 'ensure server is correctly running'
-  task :ping do
-    on roles(:app), in: :sequence do
-      within current_path do 
-        execute :echo, 'pinging'
-        execute :sleep, '4'
-        system "curl -o /dev/null --max-time 10 --silent --head --write-out '%{http_code}' "+fetch(:url_ping)+"/ping | grep -q 200"
-        if($?.exitstatus != 0) then
-          puts 'ping failed: ' + $?.exitstatus.to_s
-          exit
-        end
-      end
-    end
-  end
-
-  after :start, 'deploy:ping'
 end

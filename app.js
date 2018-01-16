@@ -1,9 +1,17 @@
 const {URL} = require('url');
 const https = require('https');
 const http = require('http');
-const githubhookEndpoint = 'https://githubhook-dev.citylity.com/pushes';
-const jenkinsEndpoint = 'http://reg.citylity.com';
-
+var config = require('./config');
+var urlToModule = function(url){
+    const myURL = new URL(url);
+    var m = {
+        'http:':http,
+        'https:':https
+    };
+    var prot = m[myURL.protocol];
+    if(!prot){return Promise.reject('invalid protocol for url ', config.jenkinsEndpoint)}
+    return prot;
+}
 /**
  * payload of a githubhook with an added field
  * githubhook:{
@@ -16,13 +24,14 @@ function processPush(push){
     return post(push).then(_=>{
         return deletePush(push);
     }).then(_=>{
-        console.log('ok');
+        console.log(new Date()+' ok');
     })
 }
 function fetch(url){
     const myURL = new URL(url);
+    var prot = urlToModule(url);
     return new Promise(function(resolve, reject){
-        var req = https.request({
+        var req = prot.request({
             method:'GET',
             path: myURL.pathname,
             hostname:myURL.hostname,
@@ -49,9 +58,11 @@ function fetch(url){
     });
 }
 function deletePush(push){
-    const myURL = new URL(githubhookEndpoint);
+    var url = config.githubhookEndpoint;
+    const myURL = new URL(url);
+    var prot = urlToModule(url);
     return new Promise(function(resolve, reject){
-        var req = https.request({
+        var req = prot.request({
             method:'DELETE',
             path: myURL.pathname+'/'+push._id,
             hostname:myURL.hostname,
@@ -73,13 +84,9 @@ function deletePush(push){
 }
 
 function post(data){
-    const myURL = new URL(jenkinsEndpoint+data.githubhook.url);
-    var m = {
-        'http:':http,
-        'https:':https
-    };
-    var prot = m[myURL.protocol];
-    if(!prot){return Promise.reject('invalid protocol for url ', jenkinsEndpoint)}
+    var url = config.jenkinsEndpoint+data.githubhook.url;
+    const myURL = new URL(url);
+    var prot = urlToModule(url);
     return new Promise(function(resolve, reject){
         var req = prot.request({
             method:'POST',
@@ -104,14 +111,14 @@ function post(data){
 
 
 function dequeue(){
-    return fetch(githubhookEndpoint).then(pushes=>{
+    return fetch(config.githubhookEndpoint).then(pushes=>{
         return pushes.reduce((acc,push)=>{
             return acc.then(_=>{
                 return processPush(push);
             })
         }, Promise.resolve())
     }).catch(e=>{
-        console.log('e :' , e)
+        console.log(new Date()+' e :' , e)
     })
 }
 
@@ -119,12 +126,28 @@ setInterval(dequeue, 60*1000); //fetch every minute
 
 
 const WebSocket = require('ws');
-const hostname = ((new URL(githubhookEndpoint)).hostname);
-const ws = new WebSocket('wss://'+hostname);
-ws.on('message', function incoming(data){
-    if(data == 'push'){
-        return dequeue().catch(e=>{
-            console.log('e : ', e);
-        })
-    }
-});
+function reloadWs(){
+    const ws = new WebSocket(config.wsEndpoint);
+    ws.on('open', function(){
+        console.log('connected');
+    })
+    ws.on('message', function incoming(data){
+        if(data == 'push'){
+            return dequeue().catch(e=>{
+                console.log('e : ', e);
+            })
+        }
+    });
+    ws.on('close', function(){
+        console.log(new Date()+' close');
+        delete ws;
+        setTimeout(function(){
+            reloadWs();//timeout so we dont force the connection if deploying e.g
+        }, 3000)
+    })
+
+    ws.on('error', function(e){
+        console.log('error conn');//silent
+    })
+}
+reloadWs();
